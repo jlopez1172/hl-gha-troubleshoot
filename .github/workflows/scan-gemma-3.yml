@@ -11,7 +11,7 @@ permissions:
 jobs:
   scan_huggingface_model:
     runs-on: ubuntu-latest
-    name: Scan google/gemma-3-12b-it via hf://
+    name: Scan google/gemma-3-1b-it via hf://
     steps:
       - uses: actions/checkout@v3
 
@@ -33,7 +33,7 @@ jobs:
         id: scan_model_huggingface
         uses:  hiddenlayerai/hiddenlayer-model-scan-github-action@user_specified_http_timeout
         with:
-          model_path: hf://google/gemma-3-12b-it
+          model_path: hf://google/gemma-3-1b-it
           fail_on_detection: false
           sarif_file: output.sarif
         env:
