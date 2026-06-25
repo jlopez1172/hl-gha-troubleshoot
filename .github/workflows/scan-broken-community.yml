@@ -10,11 +10,10 @@ name: PRESET - Broken baseline - community_scan on gated repo
 
 on:
   workflow_dispatch:
-    inputs:
-      gha_version:
-        description: "Tag to test (e.g. v1.0.5 or v1.0.8). Same failure expected on both."
-        required: true
-        default: "v1.0.8"
+
+# To re-test against v1.0.5 instead of v1.0.8, change the `@v1.0.8` tag below.
+# (GitHub Actions does not allow expressions in the `uses:` clause, so we
+# can't parameterize the version via workflow_dispatch input.)
 
 jobs:
   scan:
@@ -26,7 +25,7 @@ jobs:
       - name: Scan via community_scan path (no HF token plumbed through)
         id: scan
         continue-on-error: true
-        uses: hiddenlayerai/hiddenlayer-model-scan-github-action@${{ inputs.gha_version }}
+        uses: hiddenlayerai/hiddenlayer-model-scan-github-action@v1.0.8
         with:
           model_path: google/gemma-3-12b-it
           model_version: main

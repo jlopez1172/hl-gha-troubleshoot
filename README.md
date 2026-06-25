@@ -56,15 +56,27 @@ gh secret set HUGGINGFACE_TOKEN
 
 ### 3. Smoke test
 
-Run the public flair smoke test first to verify wiring:
+Verify GitHub has indexed the workflows, then run the public flair smoke test:
 
 ```
-gh workflow run "PRESET - Quick smoke test - public flair model"
+gh workflow list
+gh workflow run scan-quick-public.yml -f use_hf_path=true
 gh run watch
 ```
 
-If that finishes successfully (~1 minute) and shows a row in the HL Supply Chain
-console for `flair/ner-english-ontonotes`, the harness is good to go.
+(If `gh workflow list` is empty just-after-push, give GitHub ~15 seconds to index
+and re-try. Always dispatch by **filename**, not display name — `gh workflow run`
+is strict about display-name matching.)
+
+If the run finishes successfully (~1 minute) and shows a row in the HL Supply
+Chain console for `flair/ner-english-ontonotes`, the harness is good to go.
+
+### A note on action versions
+
+All workflows hardcode `@v1.0.8` of `hiddenlayerai/hiddenlayer-model-scan-github-action`.
+GitHub Actions does not allow `${{ inputs.* }}` expressions in the `uses:` clause,
+so we can't parameterize the version at dispatch time. To re-test against a
+different release (e.g. `v1.0.5`), edit the tag in the YAML and push.
 
 ## What's in here
 
@@ -77,18 +89,18 @@ console for `flair/ner-english-ontonotes`, the harness is good to go.
 
 ## Common dispatch commands
 
+Always dispatch by filename. Display names with spaces / special characters
+fail to match in `gh workflow run`.
+
 ```
-gh workflow run "PRESET - Quick smoke test - public flair model" \
-  -f gha_version=v1.0.8 -f use_hf_path=true
+gh workflow run scan-quick-public.yml -f use_hf_path=true
 
-gh workflow run "PRESET - Customer fix - hf://google/gemma-3-12b-it"
+gh workflow run scan-fix-gemma-3-12b.yml
 
-gh workflow run "PRESET - Broken baseline - community_scan on gated repo" \
-  -f gha_version=v1.0.5
+gh workflow run scan-broken-community.yml
 
-gh workflow run "HL Model Scan (parameterized)" \
+gh workflow run scan.yml \
   -f model_path="hf://meta-llama/Llama-3.2-1B" \
-  -f gha_version=v1.0.8 \
   -f free_disk_space=false \
   -f fail_on_detection=false
 ```

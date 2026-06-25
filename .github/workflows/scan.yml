@@ -19,10 +19,6 @@ on:
         description: "Set to HUGGING_FACE to exercise the community_scan endpoint (no HF token). Leave blank to use whichever path model_path implies."
         required: false
         default: ""
-      gha_version:
-        description: "Tag of hiddenlayerai/hiddenlayer-model-scan-github-action to test (e.g. v1.0.5 or v1.0.8)."
-        required: true
-        default: "v1.0.8"
       free_disk_space:
         description: "Free ~30 GB on the runner before downloading. Required for models > ~10 GB."
         required: true
@@ -37,7 +33,7 @@ on:
 jobs:
   scan:
     runs-on: ubuntu-latest
-    name: ${{ inputs.gha_version }} | ${{ inputs.model_path }} ${{ inputs.community_scan && format('community_scan={0}', inputs.community_scan) || '' }}
+    name: v1.0.8 | ${{ inputs.model_path }} ${{ inputs.community_scan && format('community_scan={0}', inputs.community_scan) || '' }}
     steps:
       - uses: actions/checkout@v3
 
@@ -55,9 +51,12 @@ jobs:
       - name: Show disk space before scan
         run: df -h /
 
+      # Note: GitHub Actions does not allow expressions in the `uses:` clause,
+      # so the action version is hardcoded. Edit the tag below if you need to
+      # test a different release (e.g. @v1.0.5 to reproduce older behavior).
       - name: Scan model
         id: scan
-        uses: hiddenlayerai/hiddenlayer-model-scan-github-action@${{ inputs.gha_version }}
+        uses: hiddenlayerai/hiddenlayer-model-scan-github-action@v1.0.8
         with:
           model_path: ${{ inputs.model_path }}
           community_scan: ${{ inputs.community_scan }}

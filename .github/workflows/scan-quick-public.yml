@@ -8,10 +8,6 @@ name: PRESET - Quick smoke test - public flair model
 on:
   workflow_dispatch:
     inputs:
-      gha_version:
-        description: "Tag to test."
-        required: true
-        default: "v1.0.8"
       use_hf_path:
         description: "True = test hf:// path. False = test community_scan path."
         required: true
@@ -21,13 +17,13 @@ on:
 jobs:
   scan:
     runs-on: ubuntu-latest
-    name: ${{ inputs.gha_version }} smoke test (${{ inputs.use_hf_path && 'hf://' || 'community_scan' }})
+    name: v1.0.8 smoke test (${{ inputs.use_hf_path && 'hf://' || 'community_scan' }})
     steps:
       - uses: actions/checkout@v3
 
       - name: Scan (hf:// path)
         if: ${{ inputs.use_hf_path }}
-        uses: hiddenlayerai/hiddenlayer-model-scan-github-action@${{ inputs.gha_version }}
+        uses: hiddenlayerai/hiddenlayer-model-scan-github-action@v1.0.8
         with:
           model_path: hf://flair/ner-english-ontonotes
           fail_on_detection: false
@@ -37,7 +33,7 @@ jobs:
 
       - name: Scan (community_scan path)
         if: ${{ !inputs.use_hf_path }}
-        uses: hiddenlayerai/hiddenlayer-model-scan-github-action@${{ inputs.gha_version }}
+        uses: hiddenlayerai/hiddenlayer-model-scan-github-action@v1.0.8
         with:
           model_path: flair/ner-english-ontonotes
           model_version: main
