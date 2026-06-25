@@ -1,0 +1,20 @@
+name: Scan Gemma 3 12B via hf://
+on:
+  workflow_dispatch:
+jobs:
+  scan_huggingface_model:
+    runs-on: ubuntu-latest
+    name: Scan google/gemma-3-12b-it via hf://
+    steps:
+      - uses: actions/checkout@v3
+      - name: Scan HuggingFace Model
+        id: scan_model_huggingface
+        uses: hiddenlayerai/hiddenlayer-model-scan-github-action@v1.0.8
+        with:
+          model_path: hf://google/gemma-3-12b-it
+          fail_on_detection: false
+          sarif_file: output.sarif
+        env:
+          HL_CLIENT_ID: ${{ secrets.HL_CLIENT_ID }}
+          HL_CLIENT_SECRET: ${{ secrets.HL_CLIENT_SECRET }}
+          HUGGINGFACE_TOKEN: ${{ secrets.HF_TOKEN }}
