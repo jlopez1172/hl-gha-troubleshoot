@@ -31,7 +31,7 @@ jobs:
 
       - name: Scan HuggingFace Model
         id: scan_model_huggingface
-        uses: hiddenlayerai/hiddenlayer-model-scan-github-action@v1.0.8
+        uses:  hiddenlayerai/hiddenlayer-model-scan-github-action@user_specified_http_timeout
         with:
           model_path: hf://google/gemma-3-12b-it
           fail_on_detection: false
