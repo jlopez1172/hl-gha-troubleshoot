@@ -1,0 +1,81 @@
+name: HL Model Scan (parameterized)
+
+# Generic harness for ad-hoc troubleshooting of the HiddenLayer GHA.
+# Trigger this from the Actions tab -> Run workflow -> pick inputs.
+
+on:
+  workflow_dispatch:
+    inputs:
+      model_path:
+        description: |
+          model_path for the scan step.
+          Examples:
+            hf://google/gemma-3-12b-it           (uses the local-download + paid-scan path; needs HUGGINGFACE_TOKEN secret)
+            flair/ner-english-ontonotes          (use with community_scan=HUGGING_FACE for the community-scan API path)
+            hf://flair/ner-english-ontonotes     (smallest public sanity test of the hf:// path)
+        required: true
+        default: "hf://flair/ner-english-ontonotes"
+      community_scan:
+        description: "Set to HUGGING_FACE to exercise the community_scan endpoint (no HF token). Leave blank to use whichever path model_path implies."
+        required: false
+        default: ""
+      gha_version:
+        description: "Tag of hiddenlayerai/hiddenlayer-model-scan-github-action to test (e.g. v1.0.5 or v1.0.8)."
+        required: true
+        default: "v1.0.8"
+      free_disk_space:
+        description: "Free ~30 GB on the runner before downloading. Required for models > ~10 GB."
+        required: true
+        type: boolean
+        default: false
+      fail_on_detection:
+        description: "Fail the job if HL reports detections. Leave false for troubleshooting so you always see results."
+        required: true
+        type: boolean
+        default: false
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    name: ${{ inputs.gha_version }} | ${{ inputs.model_path }} ${{ inputs.community_scan && format('community_scan={0}', inputs.community_scan) || '' }}
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Free disk space on runner
+        if: ${{ inputs.free_disk_space }}
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: false
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          swap-storage: true
+
+      - name: Show disk space before scan
+        run: df -h /
+
+      - name: Scan model
+        id: scan
+        uses: hiddenlayerai/hiddenlayer-model-scan-github-action@${{ inputs.gha_version }}
+        with:
+          model_path: ${{ inputs.model_path }}
+          community_scan: ${{ inputs.community_scan }}
+          fail_on_detection: ${{ inputs.fail_on_detection }}
+          sarif_file: output.sarif
+        env:
+          HL_CLIENT_ID:      ${{ secrets.HL_CLIENT_ID }}
+          HL_CLIENT_SECRET:  ${{ secrets.HL_CLIENT_SECRET }}
+          HUGGINGFACE_TOKEN: ${{ secrets.HUGGINGFACE_TOKEN }}
+
+      - name: Show disk space after scan
+        if: always()
+        run: df -h /
+
+      - name: Upload SARIF report
+        if: always() && hashFiles('output.sarif') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: scan-results-${{ github.run_id }}
+          path: output.sarif
+          if-no-files-found: ignore

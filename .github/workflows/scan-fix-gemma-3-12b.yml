@@ -1,0 +1,49 @@
+name: PRESET - Customer fix - hf://google/gemma-3-12b-it
+
+# Reproduces the workaround for the customer's HUGGING_FACE_REPO_GATED issue:
+# use the `hf://` path so HUGGINGFACE_TOKEN is consumed locally on the runner.
+# This is the fix Emma confirmed works. Use this preset to re-verify any time.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    name: Scan hf://google/gemma-3-12b-it (gated, ~24 GB)
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Free disk space on runner
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: false
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          swap-storage: true
+
+      - run: df -h /
+
+      - name: Scan HuggingFace Model
+        id: scan
+        uses: hiddenlayerai/hiddenlayer-model-scan-github-action@v1.0.8
+        with:
+          model_path: hf://google/gemma-3-12b-it
+          fail_on_detection: false
+          sarif_file: output.sarif
+        env:
+          HL_CLIENT_ID:      ${{ secrets.HL_CLIENT_ID }}
+          HL_CLIENT_SECRET:  ${{ secrets.HL_CLIENT_SECRET }}
+          HUGGINGFACE_TOKEN: ${{ secrets.HUGGINGFACE_TOKEN }}
+
+      - if: always()
+        run: df -h /
+
+      - name: Upload SARIF report
+        if: always() && hashFiles('output.sarif') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: scan-results-${{ github.run_id }}
+          path: output.sarif

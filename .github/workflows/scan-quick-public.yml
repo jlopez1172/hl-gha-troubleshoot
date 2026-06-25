@@ -1,0 +1,48 @@
+name: PRESET - Quick smoke test - public flair model
+
+# 30-60 second sanity check that the action, secrets, and HL tenant are all
+# wired up. Uses the smallest public model in the docs example. Run this
+# any time you want to verify "the harness itself works" before kicking off
+# a longer gated-model run.
+
+on:
+  workflow_dispatch:
+    inputs:
+      gha_version:
+        description: "Tag to test."
+        required: true
+        default: "v1.0.8"
+      use_hf_path:
+        description: "True = test hf:// path. False = test community_scan path."
+        required: true
+        type: boolean
+        default: true
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    name: ${{ inputs.gha_version }} smoke test (${{ inputs.use_hf_path && 'hf://' || 'community_scan' }})
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Scan (hf:// path)
+        if: ${{ inputs.use_hf_path }}
+        uses: hiddenlayerai/hiddenlayer-model-scan-github-action@${{ inputs.gha_version }}
+        with:
+          model_path: hf://flair/ner-english-ontonotes
+          fail_on_detection: false
+        env:
+          HL_CLIENT_ID:     ${{ secrets.HL_CLIENT_ID }}
+          HL_CLIENT_SECRET: ${{ secrets.HL_CLIENT_SECRET }}
+
+      - name: Scan (community_scan path)
+        if: ${{ !inputs.use_hf_path }}
+        uses: hiddenlayerai/hiddenlayer-model-scan-github-action@${{ inputs.gha_version }}
+        with:
+          model_path: flair/ner-english-ontonotes
+          model_version: main
+          community_scan: HUGGING_FACE
+          fail_on_detection: false
+        env:
+          HL_CLIENT_ID:     ${{ secrets.HL_CLIENT_ID }}
+          HL_CLIENT_SECRET: ${{ secrets.HL_CLIENT_SECRET }}
