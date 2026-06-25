@@ -1,12 +1,28 @@
 name: Scan Gemma 3 12B via hf://
+
 on:
   workflow_dispatch:
+
 jobs:
   scan_huggingface_model:
     runs-on: ubuntu-latest
     name: Scan google/gemma-3-12b-it via hf://
     steps:
       - uses: actions/checkout@v3
+
+      - name: Free disk space on runner
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: false
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          swap-storage: true
+
+      - name: Show disk space after cleanup
+        run: df -h /
+
       - name: Scan HuggingFace Model
         id: scan_model_huggingface
         uses: hiddenlayerai/hiddenlayer-model-scan-github-action@v1.0.8
@@ -18,3 +34,7 @@ jobs:
           HL_CLIENT_ID: ${{ secrets.HL_CLIENT_ID }}
           HL_CLIENT_SECRET: ${{ secrets.HL_CLIENT_SECRET }}
           HUGGINGFACE_TOKEN: ${{ secrets.HF_TOKEN }}
+
+      - name: Show disk space after scan
+        if: always()
+        run: df -h /
