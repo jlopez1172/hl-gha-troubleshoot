@@ -15,6 +15,19 @@ jobs:
     steps:
       - uses: actions/checkout@v3
 
+      - name: Free disk space on runner
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: false
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          swap-storage: true
+
+      - name: Show disk space after cleanup
+        run: df -h /
+
       - name: Scan HuggingFace Model
         id: scan_model_huggingface
         uses: hiddenlayerai/hiddenlayer-model-scan-github-action@v1.0.8
@@ -27,11 +40,18 @@ jobs:
           HL_CLIENT_SECRET: ${{ secrets.HL_CLIENT_SECRET }}
           HUGGINGFACE_TOKEN: ${{ secrets.HF_TOKEN }}
 
+      - name: Show disk space after scan
+        if: always()
+        run: df -h /
+
       - name: Check for SARIF output
+        if: always()
         run: |
           echo "Current directory: $(pwd)"
           ls -al
+
       - name: Upload SARIF file
+        if: always() && hashFiles('output.sarif') != ''
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: output.sarif
