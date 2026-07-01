@@ -1,0 +1,22 @@
+name: Community Scan gated v1.0.8 (regression test)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    name: v1.0.8 community_scan google/gemma-3-12b-it (gated, no HF token env)
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Scan
+        uses: hiddenlayerai/hiddenlayer-model-scan-github-action@v1.0.8
+        with:
+          model_path: google/gemma-3-12b-it
+          model_version: main
+          community_scan: HUGGING_FACE
+          fail_on_detection: false
+        env:
+          HL_CLIENT_ID: ${{ secrets.HL_CLIENT_ID }}
+          HL_CLIENT_SECRET: ${{ secrets.HL_CLIENT_SECRET }}
