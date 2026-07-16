@@ -6,7 +6,7 @@ on:
       model_url:
         description: 'Small public HF model URL to smoke-test against'
         required: true
-        default: 'https://huggingface.co/hf-internal-testing/tiny-random-gpt2'
+        default: 'https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2'
   push:
     branches: [ 'feature/**', 'test/**' ]
 
