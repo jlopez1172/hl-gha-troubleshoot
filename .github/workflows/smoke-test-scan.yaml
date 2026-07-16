@@ -46,6 +46,7 @@ jobs:
           HL_CLIENT_SECRET: ${{ secrets.HL_CLIENT_SECRET }}
           HL_CONTAINER_REGISTRY_USER: ${{ secrets.HL_CONTAINER_REGISTRY_USER }}
           HL_CONTAINER_REGISTRY_SECRET: ${{ secrets.HL_CONTAINER_REGISTRY_SECRET }}
+          HIDDENLAYER_BASE_URL: ${{ vars.HIDDENLAYER_BASE_URL }}
           # tiny-random-gpt2 is public, so token is optional; forwarding both names
           # covers whatever the CLI / huggingface_hub happens to look for.
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
