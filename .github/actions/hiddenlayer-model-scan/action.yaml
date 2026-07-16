@@ -105,7 +105,7 @@ runs:
       run: |
         if [ -n "$MODEL_URL" ]; then
           docker run --rm \
-            -e HL_LICENSE -e HL_CLIENT_ID -e HL_CLIENT_SECRET -e HIDDENLAYER_BASE_URL -e HF_TOKEN -e HUGGINGFACE_TOKEN \
+            -e HL_LICENSE -e HL_CLIENT_ID -e HL_CLIENT_SECRET -e HIDDENLAYER_BASE_URL -e HF_TOKEN -e HUGGINGFACE_TOKEN -e HIDDENLAYER_AUTH_URL \
             -v "${{ runner.temp }}:/results:Z" \
             "$SCANNER_IMAGE:$SCANNER_VERSION" \
             --input "$MODEL_URL" \
@@ -113,7 +113,7 @@ runs:
             $UPLOAD_TO_HIDDENLAYER $MODEL_NAME $MODEL_VERSION
         else
           docker run --rm \
-            -e HL_LICENSE -e HL_CLIENT_ID -e HL_CLIENT_SECRET -e HIDDENLAYER_BASE_URL \
+            -e HL_LICENSE -e HL_CLIENT_ID -e HL_CLIENT_SECRET -e HIDDENLAYER_BASE_URL -e HIDDENLAYER_AUTH_URL \
             -v "$MODEL_PATH:/files-to-scan" \
             -v "${{ runner.temp }}:/results:Z" \
             "$SCANNER_IMAGE:$SCANNER_VERSION" \
@@ -135,7 +135,7 @@ runs:
       run: |
         if [ -n "$MODEL_URL" ]; then
           docker run --rm \
-            -e HL_LICENSE -e HF_TOKEN -e HUGGINGFACE_TOKEN -e HIDDENLAYER_BASE_URL \
+            -e HL_LICENSE -e HF_TOKEN -e HUGGINGFACE_TOKEN -e HIDDENLAYER_BASE_URL -e HIDDENLAYER_AUTH_URL \
             -v "${{ runner.temp }}:/results:Z" \
             "$SCANNER_IMAGE:$SCANNER_VERSION" \
             --input "$MODEL_URL" \
@@ -143,7 +143,7 @@ runs:
             --output=/results/result.sarif
         else
           docker run --rm \
-            -e HL_LICENSE -e HIDDENLAYER_BASE_URL \
+            -e HL_LICENSE -e HIDDENLAYER_BASE_URL -e HIDDENLAYER_AUTH_URL \
             -v "$MODEL_PATH:/files-to-scan" \
             -v "${{ runner.temp }}:/results:Z" \
             "$SCANNER_IMAGE:$SCANNER_VERSION" \
