@@ -1,0 +1,190 @@
+name: 'Model Scanner Self Hosted'
+description: 'Scans models for vulnerabilities using the HiddenLayer Model Scanner Self Hosted CLI'
+branding:
+  icon: lock
+  color: green
+inputs:
+  model_path:
+    description: 'Path to the model, either a file or a folder. Mutually exclusive with model_url.'
+    required: false
+    default: ''
+  model_url:
+    description: 'URL to the model (e.g. https://huggingface.co/<org>/<repo>). Mutually exclusive with model_path.'
+    required: false
+    default: ''
+  fail_on_detection:
+    description: Fails pipeline if a malicious model is detected.
+    required: false
+    default: true
+  output_file:
+    description: Writes detection output to a json file.
+    required: false
+    default: null
+  sarif_file:
+    description: Writes detection output in the SARIF format to a file.
+    required: false
+    default: null
+  run_id:
+    description: Run ID
+    required: false
+    default: null
+  upload_to_hiddenlayer:
+    description: 'Uploads the report to HiddenLayer cloud'
+    required: false
+    default: true
+  upload_to_github_security:
+    description: 'Uploads the SARIF file to GitHub Security'
+    required: false
+    default: false
+  container_registry:
+    description: 'Container registry to authenticate against for pulling the scanner image'
+    required: false
+    default: 'images.hiddenlayer.ai'
+  local_scanner_image:
+    description: 'Perform scans using a local scanner container image'
+    required: false
+    default: 'images.hiddenlayer.ai/proxy/aisec-platform/ghcr.io/hiddenlayer-engineering/modelscanner-src'
+  local_scanner_version:
+    description: 'Version of the local scanner container image'
+    required: false
+    default: '26.6.1'
+  model_name:
+    description: 'Name of the model'
+    required: false
+    default: null
+  model_version:
+    description: 'Version of the model'
+    required: false
+    default: null
+outputs:
+  detection_results:
+    description: 'Markdown table of detection results.'
+runs:
+  using: 'composite'
+  steps:
+    - name: Login to container registry
+      shell: bash
+      run: docker login --username="$HL_CONTAINER_REGISTRY_USER" --password="$HL_CONTAINER_REGISTRY_SECRET" "${{ inputs.container_registry }}"
+
+    - name: Validate model source
+      shell: bash
+      run: |
+        if [ -z "${{ inputs.model_path }}" ] && [ -z "${{ inputs.model_url }}" ]; then
+          echo "::error::Either model_path or model_url must be provided"
+          exit 1
+        fi
+        if [ -n "${{ inputs.model_path }}" ] && [ -n "${{ inputs.model_url }}" ]; then
+          echo "::error::model_path and model_url are mutually exclusive"
+          exit 1
+        fi
+
+    - name: Calculate CLI Parameters
+      shell: bash
+      id: calculate_cli_parameters
+      run: |
+        if [ -n "${{ inputs.model_name }}" ]; then
+          echo "MODEL_NAME=--model-name=${{ inputs.model_name }}" >> $GITHUB_ENV
+        else
+          echo "MODEL_NAME=" >> $GITHUB_ENV
+        fi
+        if [ -n "${{ inputs.model_version }}" ]; then
+          echo "MODEL_VERSION=--model-version=${{ inputs.model_version }}" >> $GITHUB_ENV
+        else
+          echo "MODEL_VERSION=" >> $GITHUB_ENV
+        fi
+        echo "SARIF_FILE=${{ runner.temp }}/result.sarif" >> $GITHUB_ENV
+        echo "OUTPUT_FILE=${{ runner.temp }}/result.json" >> $GITHUB_ENV
+        touch ${{ runner.temp }}/result.sarif
+        touch ${{ runner.temp }}/result.json
+        chmod ugo+rw ${{ runner.temp }}/result.sarif
+        chmod ugo+rw ${{ runner.temp }}/result.json
+
+    - name: Scan Models
+      id: scan_models
+      shell: bash
+      run: |
+        if [ -n "$MODEL_URL" ]; then
+          docker run --rm \
+            -e HL_LICENSE -e HL_CLIENT_ID -e HL_CLIENT_SECRET -e HF_TOKEN -e HUGGINGFACE_TOKEN \
+            -v "${{ runner.temp }}:/results:Z" \
+            "$SCANNER_IMAGE:$SCANNER_VERSION" \
+            --input "$MODEL_URL" \
+            --output=/results/result.json \
+            $UPLOAD_TO_HIDDENLAYER $MODEL_NAME $MODEL_VERSION
+        else
+          docker run --rm \
+            -e HL_LICENSE -e HL_CLIENT_ID -e HL_CLIENT_SECRET \
+            -v "$MODEL_PATH:/files-to-scan" \
+            -v "${{ runner.temp }}:/results:Z" \
+            "$SCANNER_IMAGE:$SCANNER_VERSION" \
+            --input /files-to-scan \
+            --output=/results/result.json \
+            $UPLOAD_TO_HIDDENLAYER $MODEL_NAME $MODEL_VERSION
+        fi
+      env:
+        UPLOAD_TO_HIDDENLAYER: ${{ inputs.upload_to_hiddenlayer == 'true' && '--persist' || '' }}
+        SCANNER_IMAGE: ${{ inputs.local_scanner_image }}
+        SCANNER_VERSION: ${{ inputs.local_scanner_version }}
+        MODEL_PATH: ${{ inputs.model_path }}
+        MODEL_URL: ${{ inputs.model_url }}
+
+    - name: Scan Models (Sarif)
+      id: scan_models_sarif
+      if: ${{ inputs.sarif_file || inputs.upload_to_github_security == 'true' }}
+      shell: bash
+      run: |
+        if [ -n "$MODEL_URL" ]; then
+          docker run --rm \
+            -e HL_LICENSE -e HF_TOKEN -e HUGGINGFACE_TOKEN \
+            -v "${{ runner.temp }}:/results:Z" \
+            "$SCANNER_IMAGE:$SCANNER_VERSION" \
+            --input "$MODEL_URL" \
+            --output-format=sarif \
+            --output=/results/result.sarif
+        else
+          docker run --rm \
+            -e HL_LICENSE \
+            -v "$MODEL_PATH:/files-to-scan" \
+            -v "${{ runner.temp }}:/results:Z" \
+            "$SCANNER_IMAGE:$SCANNER_VERSION" \
+            --input /files-to-scan \
+            --output-format=sarif \
+            --output=/results/result.sarif
+        fi
+      env:
+        SCANNER_IMAGE: ${{ inputs.local_scanner_image }}
+        SCANNER_VERSION: ${{ inputs.local_scanner_version }}
+        MODEL_PATH: ${{ inputs.model_path }}
+        MODEL_URL: ${{ inputs.model_url }}
+
+    - name: Upload to Github Security
+      if: ${{ inputs.upload_to_github_security == 'true' }}
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: ${{ runner.temp }}/result.sarif
+
+    - name: Show Scan (JSON)
+      shell: bash
+      run: |
+        cat $OUTPUT_FILE
+
+    - name: Copy Results
+      shell: bash
+      if: ${{ inputs.output_file || inputs.sarif_file }}
+      run: |
+        if [ -n "${{ inputs.output_file }}" ]; then
+          cp $OUTPUT_FILE $GITHUB_WORKSPACE/${{ inputs.output_file }}
+        fi
+        if [ -n "${{ inputs.sarif_file }}" ]; then
+          cp $SARIF_FILE $GITHUB_WORKSPACE/${{ inputs.sarif_file }}
+        fi
+
+    - name: Fail Job if Detections
+      shell: bash
+      if: ${{ inputs.fail_on_detection == 'true' }}
+      run: |
+        detections=$(cat $OUTPUT_FILE | jq '.detection_count')
+        if [ $detections -gt 0 ]; then
+          echo "Detections found: $detections. Failing job."
+          exit 1
+        fi
