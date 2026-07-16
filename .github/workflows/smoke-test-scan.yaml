@@ -42,7 +42,7 @@ jobs:
           upload_to_github_security: false
         env:
           HL_LICENSE: ${{ secrets.HL_LICENSE }}
-          HL_CLIENT_ID: ${{ vars.HL_CLIENT_ID }}
+          HL_CLIENT_ID: ${{ secrets.HL_CLIENT_ID }}
           HL_CLIENT_SECRET: ${{ secrets.HL_CLIENT_SECRET }}
           HL_CONTAINER_REGISTRY_USER: ${{ secrets.HL_CONTAINER_REGISTRY_USER }}
           HL_CONTAINER_REGISTRY_SECRET: ${{ secrets.HL_CONTAINER_REGISTRY_SECRET }}
