@@ -31,14 +31,14 @@ jobs:
         uses: ./.github/actions/hiddenlayer-model-scan
         with:
           model_url: ${{ inputs.model_url || 'https://huggingface.co/hf-internal-testing/tiny-random-gpt2' }}
-          model_name: smoke-${{ github.run_id }}
-          model_version: '1'
+          model_name: hf-internal-testing/tiny-random-gpt2
+          model_version: gha-smoke-${{ github.run_number }}
           local_scanner_image: images.hiddenlayer.ai/proxy/aisec-platform/ghcr.io/hiddenlayer-engineering/modelscanner-src
           local_scanner_version: 26.6.1
           output_file: scan-results.json
           sarif_file: output.sarif
           fail_on_detection: false        # don't fail smoke test on real detections in a public model
-          upload_to_hiddenlayer: false    # keep the HL console clean during smoke tests
+          upload_to_hiddenlayer: true    # keep the HL console clean during smoke tests
           upload_to_github_security: false
         env:
           HL_LICENSE: ${{ secrets.HL_LICENSE }}
