@@ -1,0 +1,79 @@
+name: Smoke test HiddenLayer local scanner
+
+on:
+  workflow_dispatch:
+    inputs:
+      model_url:
+        description: 'Small public HF model URL to smoke-test against'
+        required: true
+        default: 'https://huggingface.co/hf-internal-testing/tiny-random-gpt2'
+  push:
+    branches: [ 'feature/**', 'test/**' ]
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  smoke_scan_hf:
+    name: Smoke test on ubuntu-latest via HF pull
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show disk before scan
+        run: df -h /
+
+      - name: Scan tiny HuggingFace model
+        id: smoke_scan
+        timeout-minutes: 15
+        uses: ./
+        with:
+          model_url: ${{ inputs.model_url || 'https://huggingface.co/hf-internal-testing/tiny-random-gpt2' }}
+          model_name: smoke-${{ github.run_id }}
+          model_version: '1'
+          local_scanner_image: images.hiddenlayer.ai/proxy/aisec-platform/ghcr.io/hiddenlayer-engineering/modelscanner-src
+          local_scanner_version: 26.6.1
+          output_file: scan-results.json
+          sarif_file: output.sarif
+          fail_on_detection: false        # don't fail smoke test on real detections in a public model
+          upload_to_hiddenlayer: false    # keep the HL console clean during smoke tests
+          upload_to_github_security: false
+        env:
+          HL_LICENSE: ${{ secrets.HL_LICENSE }}
+          HL_CLIENT_ID: ${{ vars.HL_CLIENT_ID }}
+          HL_CLIENT_SECRET: ${{ secrets.HL_CLIENT_SECRET }}
+          HL_CONTAINER_REGISTRY_USER: ${{ secrets.HL_CONTAINER_REGISTRY_USER }}
+          HL_CONTAINER_REGISTRY_SECRET: ${{ secrets.HL_CONTAINER_REGISTRY_SECRET }}
+          # tiny-random-gpt2 is public, so token is optional; forwarding both names
+          # covers whatever the CLI / huggingface_hub happens to look for.
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HUGGINGFACE_TOKEN: ${{ secrets.HF_TOKEN }}
+
+      - name: Show disk after scan
+        if: always()
+        run: df -h /
+
+      - name: Inspect results
+        if: always()
+        run: |
+          echo "== workspace =="
+          ls -al
+          if [ -f scan-results.json ]; then
+            echo "== scan-results.json =="
+            jq '{detection_count, scan_id: (.scan_id // "-"), model: (.model // "-")}' scan-results.json || cat scan-results.json
+          fi
+          if [ -f output.sarif ]; then
+            echo "== output.sarif runs[0].results length =="
+            jq '.runs[0].results | length' output.sarif || cat output.sarif
+          fi
+
+      - name: Upload smoke artifacts
+        if: always() && (hashFiles('scan-results.json') != '' || hashFiles('output.sarif') != '')
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-scan-results
+          path: |
+            scan-results.json
+            output.sarif
