@@ -28,7 +28,7 @@ jobs:
       - name: Scan tiny HuggingFace model
         id: smoke_scan
         timeout-minutes: 15
-        uses: ./
+        uses: ./.github/actions/hiddenlayer-model-scan
         with:
           model_url: ${{ inputs.model_url || 'https://huggingface.co/hf-internal-testing/tiny-random-gpt2' }}
           model_name: smoke-${{ github.run_id }}
