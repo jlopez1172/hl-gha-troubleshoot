@@ -1,0 +1,110 @@
+name: Customer repro - gte community scan SARIF v1.0.5
+
+# Recreates the customer's HiddenLayer_Community_Scan_1.0.5 pipeline against
+# Alibaba-NLP/gte-{base,large}-en-v1.5 — console shows JSON_0001 / Repository
+# Sideloading, but GHAS shows no HIDDENLAYER alerts.
+#
+# Copy into hl-gha-troubleshoot/.github/workflows/ then push + dispatch.
+
+on:
+  workflow_dispatch:
+    inputs:
+      model_choice:
+        type: choice
+        description: HuggingFace repo id for community_scan
+        required: true
+        options:
+          - Alibaba-NLP/gte-base-en-v1.5
+          - Alibaba-NLP/gte-large-en-v1.5
+      runner_choice:
+        type: choice
+        description: Runner (ubuntu-latest is enough for these models)
+        required: true
+        default: ubuntu-latest
+        options:
+          - ubuntu-latest
+
+permissions:
+  contents: read
+  security-events: write
+  actions: read
+
+jobs:
+  scan_model:
+    runs-on: ${{ github.event.inputs.runner_choice }}
+    name: v1.0.5 community_scan | ${{ github.event.inputs.model_choice }}
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Start Model Scan v1.0.5 (customer-shaped)
+        id: scan_model_huggingface
+        uses: hiddenlayerai/hiddenlayer-model-scan-github-action@v1.0.5
+        with:
+          model_path: ${{ github.event.inputs.model_choice }}
+          model_version: main
+          fail_on_detection: false
+          community_scan: 'HUGGING_FACE'
+          sarif_file: output.sarif
+        env:
+          HL_CLIENT_ID: ${{ secrets.HL_CLIENT_ID }}
+          HL_CLIENT_SECRET: ${{ secrets.HL_CLIENT_SECRET }}
+
+      - name: Diagnose SARIF on disk
+        if: always()
+        run: |
+          set -euo pipefail
+          echo "== ls -la =="
+          ls -la output.sarif || echo "NO output.sarif written"
+          if [ -f output.sarif ]; then
+            echo "== byte size =="
+            wc -c output.sarif
+            echo "== pretty JSON =="
+            python3 - <<'PY'
+          import json
+          from pathlib import Path
+          raw = Path("output.sarif").read_text()
+          data = json.loads(raw)
+          runs = data.get("runs") or []
+          print(f"runs={len(runs)} bytes={len(raw)}")
+          for i, run in enumerate(runs):
+              driver = ((run.get("tool") or {}).get("driver") or {})
+              rules = driver.get("rules") or []
+              results = run.get("results") or []
+              print(f"run[{i}] tool={driver.get('name')} version={driver.get('version')}")
+              print(f"  rules defined: {len(rules)} -> {[r.get('id') for r in rules]}")
+              print(f"  results: {len(results)}")
+              for r in results:
+                  uris = []
+                  for loc in r.get("locations") or []:
+                      uri = (
+                          loc.get("physicalLocation", {})
+                          .get("artifactLocation", {})
+                          .get("uri")
+                      )
+                      uris.append(uri)
+                  print(
+                      f"  - ruleId={r.get('ruleId')} level={r.get('level')} "
+                      f"severity={(r.get('properties') or {}).get('problem.severity')} uris={uris}"
+                  )
+          print()
+          print("NOTE: GHAS expects artifactLocation.uri to resolve to a file IN THIS REPO.")
+          print("Community-scan SARIF typically points at https://huggingface.co/... or")
+          print("file://huggingface.co/... — those paths are NOT in the GitHub checkout,")
+          print("so Code Scanning often accepts the upload then shows ZERO alerts.")
+          PY
+          fi
+
+      - name: Upload SARIF as run artifact (always)
+        if: always() && hashFiles('output.sarif') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: gte-community-sarif-${{ github.run_id }}
+          path: output.sarif
+          if-no-files-found: warn
+
+      - name: Upload SARIF file to GitHub Code Scanning
+        if: always() && hashFiles('output.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: output.sarif
+          category: hiddenlayer-community-${{ github.event.inputs.model_choice }}

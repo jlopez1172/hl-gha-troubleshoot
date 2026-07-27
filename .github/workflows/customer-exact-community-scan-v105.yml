@@ -1,0 +1,49 @@
+name: Customer EXACT yaml - Community Scan 1.0.5
+
+# Near-exact copy of the customer's HiddenLayer_Community_Scan_1.0.5 workflow.
+# Intentionally omits permissions / artifact / diagnose so we can see the same
+# failure mode they report (console vulns, no GHAS alerts).
+#
+# Copy into hl-gha-troubleshoot/.github/workflows/ then push + dispatch with:
+#   model_choice = Alibaba-NLP/gte-base-en-v1.5
+#   (and again for gte-large-en-v1.5)
+
+on:
+  workflow_dispatch:
+    inputs:
+      runner_choice:
+        type: choice
+        description: Choose runner
+        required: true
+        options:
+          - ubuntu-latest
+      model_choice:
+        type: string
+        description: HuggingFace owner/repo (e.g. Alibaba-NLP/gte-base-en-v1.5)
+        required: true
+        default: Alibaba-NLP/gte-base-en-v1.5
+
+jobs:
+  scan_model:
+    runs-on: ${{ github.event.inputs.runner_choice }}
+
+    steps:
+      - uses: actions/checkout@v3
+      - name: Start Model Scan v1.0.5
+        id: scan_model_huggingface
+        uses: hiddenlayerai/hiddenlayer-model-scan-github-action@v1.0.5
+        with:
+          model_path: ${{ github.event.inputs.model_choice }}
+          model_version: main
+          fail_on_detection: false
+          community_scan: 'HUGGING_FACE'
+          sarif_file: output.sarif
+        env:
+          # Customer uses GHE_HL_*; harness uses HL_*
+          HL_CLIENT_ID: ${{ secrets.HL_CLIENT_ID }}
+          HL_CLIENT_SECRET: ${{ secrets.HL_CLIENT_SECRET }}
+
+      - name: Upload SARIF file
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: output.sarif
