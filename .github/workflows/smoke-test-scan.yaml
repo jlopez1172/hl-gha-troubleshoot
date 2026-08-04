@@ -30,11 +30,11 @@ jobs:
         timeout-minutes: 15
         uses: ./.github/actions/hiddenlayer-model-scan
         with:
-          model_url: ${{ inputs.model_url || 'https://huggingface.co/hf-internal-testing/tiny-random-gpt2' }}
-          model_name: hf-internal-testing/tiny-random-gpt2
+          model_url: ${{ inputs.model_url || 'https://huggingface.co/LiquidAI/LFM2-24B-A2B' }}
+          model_name: LFM2-24B-A2B
           model_version: gha-smoke-${{ github.run_number }}
           local_scanner_image: images.hiddenlayer.ai/proxy/aisec-platform/ghcr.io/hiddenlayer-engineering/modelscanner-src
-          local_scanner_version: 26.6.1
+          local_scanner_version: 26.7.0
           output_file: scan-results.json
           sarif_file: output.sarif
           fail_on_detection: false        # don't fail smoke test on real detections in a public model
