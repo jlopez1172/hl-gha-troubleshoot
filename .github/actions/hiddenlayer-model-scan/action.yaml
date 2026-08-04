@@ -47,7 +47,7 @@ inputs:
   local_scanner_version:
     description: 'Version of the local scanner container image'
     required: false
-    default: '26.6.1'
+    default: '26.7.0'
   model_name:
     description: 'Name of the model'
     required: false
