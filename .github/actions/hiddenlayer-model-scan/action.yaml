@@ -144,10 +144,15 @@ runs:
         fi
         echo "SARIF_FILE=${{ runner.temp }}/result.sarif" >> "$GITHUB_ENV"
         echo "OUTPUT_FILE=${{ runner.temp }}/result.json" >> "$GITHUB_ENV"
+        echo "SCANNER_LOG=${{ runner.temp }}/scanner.log" >> "$GITHUB_ENV"
+        # Pre-create outputs the container user can open/truncate. Creating new
+        # files in runner.temp from inside the image often hits permission denied.
         touch "${{ runner.temp }}/result.sarif"
         touch "${{ runner.temp }}/result.json"
-        chmod ugo+rw "${{ runner.temp }}/result.sarif"
-        chmod ugo+rw "${{ runner.temp }}/result.json"
+        touch "${{ runner.temp }}/scanner.log"
+        chmod ugo+rw "${{ runner.temp }}/result.sarif" "${{ runner.temp }}/result.json" "${{ runner.temp }}/scanner.log"
+        # Also make the dir traversable/writable for non-root scanner UIDs when possible
+        chmod a+rwx "${{ runner.temp }}" || true
 
     - name: Prefetch scanner image
       shell: bash
