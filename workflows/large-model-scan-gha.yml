@@ -1,0 +1,124 @@
+# Documented large-model scan with HiddenLayer Local Model Scanner on GitHub Actions.
+#
+# Target example: LiquidAI/LFM2-24B-A2B (~48 GB weights).
+#
+# Hard constraints on github-hosted runners:
+#   - Job max runtime: 6 hours (timeout-minutes: 360)
+#   - Disk: need ~50GB+ free AFTER image pull (ubuntu-latest usually OK for ~48GB)
+#   - Do NOT request a SARIF second pass (that re-downloads the whole model)
+#   - Set secrets.HF_TOKEN — anonymous HF downloads are often too slow / rate-limited
+#
+# If 6h / disk is insufficient, use a larger GitHub runner or self-hosted runner.
+name: Large model scan (GHA local scanner)
+
+on:
+  workflow_dispatch:
+    inputs:
+      model_url:
+        description: 'Hugging Face model URL to scan'
+        required: true
+        default: 'https://huggingface.co/LiquidAI/LFM2-24B-A2B'
+      model_name:
+        description: 'Model name recorded with persist'
+        required: true
+        default: 'LFM2-24B-A2B'
+      enable_stream_scanning:
+        description: 'Enable HL_STREAM_SCANNING (experimental)'
+        type: boolean
+        required: false
+        default: false
+      upload_to_hiddenlayer:
+        description: 'Persist results to HiddenLayer platform'
+        type: boolean
+        required: false
+        default: true
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  large_model_scan:
+    name: Scan large HF model on ubuntu-latest
+    runs-on: ubuntu-latest
+    # GitHub-hosted hard cap is 6 hours
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Preflight disk / free space
+        run: |
+          echo "== runner disk =="
+          df -h /
+          avail_kb=$(df -k / | awk 'NR==2 {print $4}')
+          # Require ~55GiB free before starting (~48GB model + headroom)
+          need_kb=$((55 * 1024 * 1024))
+          if [ "$avail_kb" -lt "$need_kb" ]; then
+            echo "::error::Insufficient disk: need ~55GiB free for LFM2-24B-class models (have $((avail_kb/1024/1024))GiB)."
+            echo "Use a larger/self-hosted runner, or pick a smaller model."
+            exit 1
+          fi
+          echo "Free space OK: $((avail_kb/1024/1024))GiB available"
+
+      - name: Scan large HuggingFace model
+        id: large_scan
+        # No separate short step timeout — job timeout (6h) is the ceiling
+        uses: ./.github/actions/hiddenlayer-model-scan
+        with:
+          model_url: ${{ inputs.model_url }}
+          model_name: ${{ inputs.model_name }}
+          model_version: gha-large-${{ github.run_number }}
+          local_scanner_image: images.hiddenlayer.ai/proxy/aisec-platform/ghcr.io/hiddenlayer-engineering/modelscanner-src
+          local_scanner_version: 26.7.0
+          output_file: scan-results.json
+          # Intentionally omit sarif_file — a second pass would re-download ~48GB
+          fail_on_detection: false
+          upload_to_hiddenlayer: ${{ inputs.upload_to_hiddenlayer }}
+          upload_to_github_security: false
+          skip_sarif_rescan: true
+          enable_stream_scanning: ${{ inputs.enable_stream_scanning }}
+          scan_timeout_seconds: '21600'   # 6h, aligned with job timeout
+        env:
+          HL_LICENSE: ${{ secrets.HL_LICENSE }}
+          HL_CLIENT_ID: ${{ secrets.HL_CLIENT_ID }}
+          HL_CLIENT_SECRET: ${{ secrets.HL_CLIENT_SECRET }}
+          HL_CONTAINER_REGISTRY_USER: ${{ secrets.HL_CONTAINER_REGISTRY_USER }}
+          HL_CONTAINER_REGISTRY_SECRET: ${{ secrets.HL_CONTAINER_REGISTRY_SECRET }}
+          HIDDENLAYER_BASE_URL: ${{ vars.HIDDENLAYER_BASE_URL }}
+          HIDDENLAYER_AUTH_URL: ${{ vars.HIDDENLAYER_AUTH_URL }}
+          # Strongly recommended for large public HF repos (rate limits / throughput)
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HUGGINGFACE_TOKEN: ${{ secrets.HF_TOKEN }}
+
+      - name: Postflight disk
+        if: always()
+        run: df -h /
+
+      - name: Inspect results
+        if: always()
+        run: |
+          ls -alh
+          if [ -f scan-results.json ]; then
+            jq '{
+              detection_count,
+              scan_id: (.scan_id // "-"),
+              model: (.model // "-"),
+              file_count: ((.file_results // []) | length)
+            }' scan-results.json
+          else
+            echo "::warning::scan-results.json missing — scan likely timed out or failed before writing output"
+          fi
+          if [ -f scanner.log ]; then
+            echo "== scanner.log (tail) =="
+            tail -n 100 scanner.log
+          fi
+
+      - name: Upload large-scan artifacts
+        if: always() && (hashFiles('scan-results.json') != '' || hashFiles('scanner.log') != '')
+        uses: actions/upload-artifact@v4
+        with:
+          name: large-model-scan-${{ github.run_number }}
+          path: |
+            scan-results.json
+            scanner.log
+          if-no-files-found: warn
