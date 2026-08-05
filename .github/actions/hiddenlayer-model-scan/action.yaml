@@ -183,6 +183,9 @@ runs:
       shell: bash
       run: |
         set -x
+        # Log to stderr (live in GHA UI) and tee a copy for the artifact.
+        # Do NOT use scanner --log-file alone — that hides progress until the step ends.
+        set +e
         if [ -n "$MODEL_URL" ]; then
           docker run --rm \
             -e HL_LICENSE \
@@ -198,8 +201,8 @@ runs:
             "$SCANNER_IMAGE:$SCANNER_VERSION" \
             --input "$MODEL_URL" \
             --output=/results/result.json \
-            --log-file=/results/scanner.log \
-            $UPLOAD_TO_HIDDENLAYER $MODEL_NAME $MODEL_VERSION
+            $UPLOAD_TO_HIDDENLAYER $MODEL_NAME $MODEL_VERSION \
+            2>&1 | tee "${{ runner.temp }}/scanner.log"
         else
           docker run --rm \
             -e HL_LICENSE \
@@ -214,15 +217,14 @@ runs:
             "$SCANNER_IMAGE:$SCANNER_VERSION" \
             --input /files-to-scan \
             --output=/results/result.json \
-            --log-file=/results/scanner.log \
-            $UPLOAD_TO_HIDDENLAYER $MODEL_NAME $MODEL_VERSION
+            $UPLOAD_TO_HIDDENLAYER $MODEL_NAME $MODEL_VERSION \
+            2>&1 | tee "${{ runner.temp }}/scanner.log"
         fi
+        rc=${PIPESTATUS[0]}
+        set -e
         echo "== disk after scan =="
         df -h /
-        if [ -f "${{ runner.temp }}/scanner.log" ]; then
-          echo "== scanner.log (tail) =="
-          tail -n 80 "${{ runner.temp }}/scanner.log" || true
-        fi
+        exit "$rc"
       env:
         UPLOAD_TO_HIDDENLAYER: ${{ inputs.upload_to_hiddenlayer == 'true' && '--persist' || '' }}
         SCANNER_IMAGE: ${{ inputs.local_scanner_image }}
