@@ -15,27 +15,27 @@ inputs:
   fail_on_detection:
     description: Fails pipeline if a malicious model is detected.
     required: false
-    default: true
+    default: 'true'
   output_file:
     description: Writes detection output to a json file.
     required: false
-    default: null
+    default: ''
   sarif_file:
     description: Writes detection output in the SARIF format to a file.
     required: false
-    default: null
+    default: ''
   run_id:
     description: Run ID
     required: false
-    default: null
+    default: ''
   upload_to_hiddenlayer:
-    description: 'Uploads the report to HiddenLayer cloud'
+    description: 'Uploads the report to HiddenLayer (requires --persist env: HL_CLIENT_ID, HL_CLIENT_SECRET, auth + results URLs)'
     required: false
-    default: true
+    default: 'true'
   upload_to_github_security:
     description: 'Uploads the SARIF file to GitHub Security'
     required: false
-    default: false
+    default: 'false'
   container_registry:
     description: 'Container registry to authenticate against for pulling the scanner image'
     required: false
@@ -51,11 +51,11 @@ inputs:
   model_name:
     description: 'Name of the model'
     required: false
-    default: null
+    default: ''
   model_version:
     description: 'Version of the model'
     required: false
-    default: null
+    default: ''
 outputs:
   detection_results:
     description: 'Markdown table of detection results.'
@@ -78,26 +78,59 @@ runs:
           exit 1
         fi
 
+    - name: Resolve platform endpoints for persist
+      shell: bash
+      run: |
+        # modelscanner-src reads these names (defaults are localhost stubs):
+        #   HL_MODEL_SCANNER_TOKEN_URL
+        #   HL_MODEL_SCANNER_PLATFORM_RESULTS_URL
+        # Accept the friendlier HIDDENLAYER_* aliases from callers.
+        TOKEN_URL="${HL_MODEL_SCANNER_TOKEN_URL:-${HIDDENLAYER_AUTH_URL:-}}"
+        RESULTS_URL="${HL_MODEL_SCANNER_PLATFORM_RESULTS_URL:-${HIDDENLAYER_BASE_URL:-}}"
+
+        echo "HL_MODEL_SCANNER_TOKEN_URL=${TOKEN_URL}" >> "$GITHUB_ENV"
+        echo "HL_MODEL_SCANNER_PLATFORM_RESULTS_URL=${RESULTS_URL}" >> "$GITHUB_ENV"
+
+        if [ "${{ inputs.upload_to_hiddenlayer }}" = "true" ]; then
+          missing=0
+          if [ -z "${HL_CLIENT_ID:-}" ] || [ -z "${HL_CLIENT_SECRET:-}" ]; then
+            echo "::error::upload_to_hiddenlayer=true requires HL_CLIENT_ID and HL_CLIENT_SECRET"
+            missing=1
+          fi
+          if [ -z "${TOKEN_URL}" ] || [[ "${TOKEN_URL}" == *"127.0.0.1"* ]]; then
+            echo "::error::upload_to_hiddenlayer=true requires a real auth URL via HIDDENLAYER_AUTH_URL or HL_MODEL_SCANNER_TOKEN_URL (got '${TOKEN_URL:-<empty>}')"
+            missing=1
+          fi
+          if [ -z "${RESULTS_URL}" ] || [[ "${RESULTS_URL}" == *"127.0.0.1"* ]]; then
+            echo "::error::upload_to_hiddenlayer=true requires a real results URL via HIDDENLAYER_BASE_URL or HL_MODEL_SCANNER_PLATFORM_RESULTS_URL (got '${RESULTS_URL:-<empty>}')"
+            missing=1
+          fi
+          if [ "$missing" -ne 0 ]; then
+            exit 1
+          fi
+          echo "Persist enabled → auth=${TOKEN_URL} results=${RESULTS_URL}"
+        fi
+
     - name: Calculate CLI Parameters
       shell: bash
       id: calculate_cli_parameters
       run: |
         if [ -n "${{ inputs.model_name }}" ]; then
-          echo "MODEL_NAME=--model-name=${{ inputs.model_name }}" >> $GITHUB_ENV
+          echo "MODEL_NAME=--model-name=${{ inputs.model_name }}" >> "$GITHUB_ENV"
         else
-          echo "MODEL_NAME=" >> $GITHUB_ENV
+          echo "MODEL_NAME=" >> "$GITHUB_ENV"
         fi
         if [ -n "${{ inputs.model_version }}" ]; then
-          echo "MODEL_VERSION=--model-version=${{ inputs.model_version }}" >> $GITHUB_ENV
+          echo "MODEL_VERSION=--model-version=${{ inputs.model_version }}" >> "$GITHUB_ENV"
         else
-          echo "MODEL_VERSION=" >> $GITHUB_ENV
+          echo "MODEL_VERSION=" >> "$GITHUB_ENV"
         fi
-        echo "SARIF_FILE=${{ runner.temp }}/result.sarif" >> $GITHUB_ENV
-        echo "OUTPUT_FILE=${{ runner.temp }}/result.json" >> $GITHUB_ENV
-        touch ${{ runner.temp }}/result.sarif
-        touch ${{ runner.temp }}/result.json
-        chmod ugo+rw ${{ runner.temp }}/result.sarif
-        chmod ugo+rw ${{ runner.temp }}/result.json
+        echo "SARIF_FILE=${{ runner.temp }}/result.sarif" >> "$GITHUB_ENV"
+        echo "OUTPUT_FILE=${{ runner.temp }}/result.json" >> "$GITHUB_ENV"
+        touch "${{ runner.temp }}/result.sarif"
+        touch "${{ runner.temp }}/result.json"
+        chmod ugo+rw "${{ runner.temp }}/result.sarif"
+        chmod ugo+rw "${{ runner.temp }}/result.json"
 
     - name: Scan Models
       id: scan_models
@@ -105,7 +138,13 @@ runs:
       run: |
         if [ -n "$MODEL_URL" ]; then
           docker run --rm \
-            -e HL_LICENSE -e HL_CLIENT_ID -e HL_CLIENT_SECRET -e HIDDENLAYER_BASE_URL -e HF_TOKEN -e HUGGINGFACE_TOKEN -e HIDDENLAYER_AUTH_URL \
+            -e HL_LICENSE \
+            -e HL_CLIENT_ID \
+            -e HL_CLIENT_SECRET \
+            -e HL_MODEL_SCANNER_TOKEN_URL \
+            -e HL_MODEL_SCANNER_PLATFORM_RESULTS_URL \
+            -e HF_TOKEN \
+            -e HUGGINGFACE_TOKEN \
             -v "${{ runner.temp }}:/results:Z" \
             "$SCANNER_IMAGE:$SCANNER_VERSION" \
             --input "$MODEL_URL" \
@@ -113,7 +152,11 @@ runs:
             $UPLOAD_TO_HIDDENLAYER $MODEL_NAME $MODEL_VERSION
         else
           docker run --rm \
-            -e HL_LICENSE -e HL_CLIENT_ID -e HL_CLIENT_SECRET -e HIDDENLAYER_BASE_URL -e HIDDENLAYER_AUTH_URL \
+            -e HL_LICENSE \
+            -e HL_CLIENT_ID \
+            -e HL_CLIENT_SECRET \
+            -e HL_MODEL_SCANNER_TOKEN_URL \
+            -e HL_MODEL_SCANNER_PLATFORM_RESULTS_URL \
             -v "$MODEL_PATH:/files-to-scan" \
             -v "${{ runner.temp }}:/results:Z" \
             "$SCANNER_IMAGE:$SCANNER_VERSION" \
@@ -130,12 +173,14 @@ runs:
 
     - name: Scan Models (Sarif)
       id: scan_models_sarif
-      if: ${{ inputs.sarif_file || inputs.upload_to_github_security == 'true' }}
+      if: ${{ inputs.sarif_file != '' || inputs.upload_to_github_security == 'true' }}
       shell: bash
       run: |
         if [ -n "$MODEL_URL" ]; then
           docker run --rm \
-            -e HL_LICENSE -e HF_TOKEN -e HUGGINGFACE_TOKEN -e HIDDENLAYER_BASE_URL -e HIDDENLAYER_AUTH_URL \
+            -e HL_LICENSE \
+            -e HF_TOKEN \
+            -e HUGGINGFACE_TOKEN \
             -v "${{ runner.temp }}:/results:Z" \
             "$SCANNER_IMAGE:$SCANNER_VERSION" \
             --input "$MODEL_URL" \
@@ -143,7 +188,7 @@ runs:
             --output=/results/result.sarif
         else
           docker run --rm \
-            -e HL_LICENSE -e HIDDENLAYER_BASE_URL -e HIDDENLAYER_AUTH_URL \
+            -e HL_LICENSE \
             -v "$MODEL_PATH:/files-to-scan" \
             -v "${{ runner.temp }}:/results:Z" \
             "$SCANNER_IMAGE:$SCANNER_VERSION" \
@@ -166,25 +211,25 @@ runs:
     - name: Show Scan (JSON)
       shell: bash
       run: |
-        cat $OUTPUT_FILE
+        cat "$OUTPUT_FILE"
 
     - name: Copy Results
       shell: bash
-      if: ${{ inputs.output_file || inputs.sarif_file }}
+      if: ${{ inputs.output_file != '' || inputs.sarif_file != '' }}
       run: |
         if [ -n "${{ inputs.output_file }}" ]; then
-          cp $OUTPUT_FILE $GITHUB_WORKSPACE/${{ inputs.output_file }}
+          cp "$OUTPUT_FILE" "$GITHUB_WORKSPACE/${{ inputs.output_file }}"
         fi
         if [ -n "${{ inputs.sarif_file }}" ]; then
-          cp $SARIF_FILE $GITHUB_WORKSPACE/${{ inputs.sarif_file }}
+          cp "$SARIF_FILE" "$GITHUB_WORKSPACE/${{ inputs.sarif_file }}"
         fi
 
     - name: Fail Job if Detections
       shell: bash
       if: ${{ inputs.fail_on_detection == 'true' }}
       run: |
-        detections=$(cat $OUTPUT_FILE | jq '.detection_count')
-        if [ $detections -gt 0 ]; then
+        detections=$(jq '.detection_count' "$OUTPUT_FILE")
+        if [ "$detections" -gt 0 ]; then
           echo "Detections found: $detections. Failing job."
           exit 1
         fi
