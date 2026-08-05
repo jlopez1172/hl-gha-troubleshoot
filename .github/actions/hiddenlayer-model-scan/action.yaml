@@ -152,9 +152,23 @@ runs:
     - name: Prefetch scanner image
       shell: bash
       run: |
+        # images.hiddenlayer.ai token/manifest fetches occasionally time out from GHA;
+        # retry instead of failing the whole large-model job on a transient registry blip.
         echo "Pulling $SCANNER_IMAGE:$SCANNER_VERSION"
-        docker pull "$SCANNER_IMAGE:$SCANNER_VERSION"
-        df -h /
+        attempts=5
+        delay=15
+        for i in $(seq 1 "$attempts"); do
+          if docker pull "$SCANNER_IMAGE:$SCANNER_VERSION"; then
+            echo "Image pull succeeded on attempt $i"
+            df -h /
+            exit 0
+          fi
+          echo "::warning::docker pull failed (attempt $i/$attempts); retrying in ${delay}s..."
+          sleep "$delay"
+          delay=$((delay * 2))
+        done
+        echo "::error::Failed to pull $SCANNER_IMAGE:$SCANNER_VERSION after $attempts attempts (registry timeout/connectivity)."
+        exit 1
       env:
         SCANNER_IMAGE: ${{ inputs.local_scanner_image }}
         SCANNER_VERSION: ${{ inputs.local_scanner_version }}
