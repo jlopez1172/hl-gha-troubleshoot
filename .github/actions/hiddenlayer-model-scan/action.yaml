@@ -21,19 +21,23 @@ inputs:
     required: false
     default: ''
   sarif_file:
-    description: Writes detection output in the SARIF format to a file.
+    description: 'Writes SARIF output. WARNING: currently requires a second full scan of the model unless skip_sarif_rescan is false and you accept 2x download cost.'
     required: false
     default: ''
+  skip_sarif_rescan:
+    description: 'If true (default), do not re-download/re-scan just to produce SARIF. Set false only for small models when you need SARIF from a second pass.'
+    required: false
+    default: 'true'
   run_id:
     description: Run ID
     required: false
     default: ''
   upload_to_hiddenlayer:
-    description: 'Uploads the report to HiddenLayer (requires --persist env: HL_CLIENT_ID, HL_CLIENT_SECRET, auth + results URLs)'
+    description: 'Uploads the report to HiddenLayer (requires HL_CLIENT_ID, HL_CLIENT_SECRET, auth + results URLs)'
     required: false
     default: 'true'
   upload_to_github_security:
-    description: 'Uploads the SARIF file to GitHub Security'
+    description: 'Uploads the SARIF file to GitHub Security (requires a SARIF file from a prior scan pass)'
     required: false
     default: 'false'
   container_registry:
@@ -56,6 +60,14 @@ inputs:
     description: 'Version of the model'
     required: false
     default: ''
+  enable_stream_scanning:
+    description: 'Set HL_STREAM_SCANNING=true (experimental; scans remote streams without a full local materialization first)'
+    required: false
+    default: 'false'
+  scan_timeout_seconds:
+    description: 'HL_SCAN_TIMEOUT_SECONDS passed into the scanner container (default 86400 = 24h)'
+    required: false
+    default: '86400'
 outputs:
   detection_results:
     description: 'Markdown table of detection results.'
@@ -84,12 +96,13 @@ runs:
         # modelscanner-src reads these names (defaults are localhost stubs):
         #   HL_MODEL_SCANNER_TOKEN_URL
         #   HL_MODEL_SCANNER_PLATFORM_RESULTS_URL
-        # Accept the friendlier HIDDENLAYER_* aliases from callers.
         TOKEN_URL="${HL_MODEL_SCANNER_TOKEN_URL:-${HIDDENLAYER_AUTH_URL:-}}"
         RESULTS_URL="${HL_MODEL_SCANNER_PLATFORM_RESULTS_URL:-${HIDDENLAYER_BASE_URL:-}}"
 
         echo "HL_MODEL_SCANNER_TOKEN_URL=${TOKEN_URL}" >> "$GITHUB_ENV"
         echo "HL_MODEL_SCANNER_PLATFORM_RESULTS_URL=${RESULTS_URL}" >> "$GITHUB_ENV"
+        echo "HL_SCAN_TIMEOUT_SECONDS=${{ inputs.scan_timeout_seconds }}" >> "$GITHUB_ENV"
+        echo "HL_STREAM_SCANNING=${{ inputs.enable_stream_scanning }}" >> "$GITHUB_ENV"
 
         if [ "${{ inputs.upload_to_hiddenlayer }}" = "true" ]; then
           missing=0
@@ -109,6 +122,10 @@ runs:
             exit 1
           fi
           echo "Persist enabled → auth=${TOKEN_URL} results=${RESULTS_URL}"
+        fi
+
+        if [ -n "${{ inputs.model_url }}" ] && [ -z "${HF_TOKEN:-}" ]; then
+          echo "::warning::HF_TOKEN is empty. Large Hugging Face downloads are often rate-limited anonymously; set secrets.HF_TOKEN for reliable large-model scans."
         fi
 
     - name: Calculate CLI Parameters
@@ -132,10 +149,21 @@ runs:
         chmod ugo+rw "${{ runner.temp }}/result.sarif"
         chmod ugo+rw "${{ runner.temp }}/result.json"
 
+    - name: Prefetch scanner image
+      shell: bash
+      run: |
+        echo "Pulling $SCANNER_IMAGE:$SCANNER_VERSION"
+        docker pull "$SCANNER_IMAGE:$SCANNER_VERSION"
+        df -h /
+      env:
+        SCANNER_IMAGE: ${{ inputs.local_scanner_image }}
+        SCANNER_VERSION: ${{ inputs.local_scanner_version }}
+
     - name: Scan Models
       id: scan_models
       shell: bash
       run: |
+        set -x
         if [ -n "$MODEL_URL" ]; then
           docker run --rm \
             -e HL_LICENSE \
@@ -143,12 +171,15 @@ runs:
             -e HL_CLIENT_SECRET \
             -e HL_MODEL_SCANNER_TOKEN_URL \
             -e HL_MODEL_SCANNER_PLATFORM_RESULTS_URL \
+            -e HL_SCAN_TIMEOUT_SECONDS \
+            -e HL_STREAM_SCANNING \
             -e HF_TOKEN \
             -e HUGGINGFACE_TOKEN \
             -v "${{ runner.temp }}:/results:Z" \
             "$SCANNER_IMAGE:$SCANNER_VERSION" \
             --input "$MODEL_URL" \
             --output=/results/result.json \
+            --log-file=/results/scanner.log \
             $UPLOAD_TO_HIDDENLAYER $MODEL_NAME $MODEL_VERSION
         else
           docker run --rm \
@@ -157,12 +188,21 @@ runs:
             -e HL_CLIENT_SECRET \
             -e HL_MODEL_SCANNER_TOKEN_URL \
             -e HL_MODEL_SCANNER_PLATFORM_RESULTS_URL \
+            -e HL_SCAN_TIMEOUT_SECONDS \
+            -e HL_STREAM_SCANNING \
             -v "$MODEL_PATH:/files-to-scan" \
             -v "${{ runner.temp }}:/results:Z" \
             "$SCANNER_IMAGE:$SCANNER_VERSION" \
             --input /files-to-scan \
             --output=/results/result.json \
+            --log-file=/results/scanner.log \
             $UPLOAD_TO_HIDDENLAYER $MODEL_NAME $MODEL_VERSION
+        fi
+        echo "== disk after scan =="
+        df -h /
+        if [ -f "${{ runner.temp }}/scanner.log" ]; then
+          echo "== scanner.log (tail) =="
+          tail -n 80 "${{ runner.temp }}/scanner.log" || true
         fi
       env:
         UPLOAD_TO_HIDDENLAYER: ${{ inputs.upload_to_hiddenlayer == 'true' && '--persist' || '' }}
@@ -173,12 +213,15 @@ runs:
 
     - name: Scan Models (Sarif)
       id: scan_models_sarif
-      if: ${{ inputs.sarif_file != '' || inputs.upload_to_github_security == 'true' }}
+      # Second full download+scan — avoid for large models.
+      if: ${{ (inputs.sarif_file != '' || inputs.upload_to_github_security == 'true') && inputs.skip_sarif_rescan != 'true' }}
       shell: bash
       run: |
         if [ -n "$MODEL_URL" ]; then
           docker run --rm \
             -e HL_LICENSE \
+            -e HL_SCAN_TIMEOUT_SECONDS \
+            -e HL_STREAM_SCANNING \
             -e HF_TOKEN \
             -e HUGGINGFACE_TOKEN \
             -v "${{ runner.temp }}:/results:Z" \
@@ -189,6 +232,8 @@ runs:
         else
           docker run --rm \
             -e HL_LICENSE \
+            -e HL_SCAN_TIMEOUT_SECONDS \
+            -e HL_STREAM_SCANNING \
             -v "$MODEL_PATH:/files-to-scan" \
             -v "${{ runner.temp }}:/results:Z" \
             "$SCANNER_IMAGE:$SCANNER_VERSION" \
@@ -202,33 +247,52 @@ runs:
         MODEL_PATH: ${{ inputs.model_path }}
         MODEL_URL: ${{ inputs.model_url }}
 
+    - name: Note skipped SARIF rescan
+      if: ${{ (inputs.sarif_file != '' || inputs.upload_to_github_security == 'true') && inputs.skip_sarif_rescan == 'true' }}
+      shell: bash
+      run: |
+        echo "::notice::SARIF rescan skipped (skip_sarif_rescan=true). JSON results were produced in a single pass; a second scan would re-download the full model."
+
     - name: Upload to Github Security
-      if: ${{ inputs.upload_to_github_security == 'true' }}
+      if: ${{ inputs.upload_to_github_security == 'true' && inputs.skip_sarif_rescan != 'true' }}
       uses: github/codeql-action/upload-sarif@v3
       with:
         sarif_file: ${{ runner.temp }}/result.sarif
 
-    - name: Show Scan (JSON)
+    - name: Show Scan summary (JSON)
       shell: bash
       run: |
-        cat "$OUTPUT_FILE"
+        if [ ! -s "$OUTPUT_FILE" ]; then
+          echo "::warning::No scan results written to $OUTPUT_FILE"
+          exit 0
+        fi
+        # Avoid dumping multi-MB JSON into GHA logs on large models
+        jq '{
+          detection_count,
+          scan_id: (.scan_id // "-"),
+          model: (.model // "-"),
+          file_count: ((.file_results // []) | length)
+        }' "$OUTPUT_FILE" || head -c 4000 "$OUTPUT_FILE"
 
     - name: Copy Results
       shell: bash
-      if: ${{ inputs.output_file != '' || inputs.sarif_file != '' }}
+      if: ${{ inputs.output_file != '' || (inputs.sarif_file != '' && inputs.skip_sarif_rescan != 'true') }}
       run: |
-        if [ -n "${{ inputs.output_file }}" ]; then
+        if [ -n "${{ inputs.output_file }}" ] && [ -s "$OUTPUT_FILE" ]; then
           cp "$OUTPUT_FILE" "$GITHUB_WORKSPACE/${{ inputs.output_file }}"
         fi
-        if [ -n "${{ inputs.sarif_file }}" ]; then
+        if [ -n "${{ inputs.sarif_file }}" ] && [ "${{ inputs.skip_sarif_rescan }}" != "true" ] && [ -s "$SARIF_FILE" ]; then
           cp "$SARIF_FILE" "$GITHUB_WORKSPACE/${{ inputs.sarif_file }}"
+        fi
+        if [ -f "${{ runner.temp }}/scanner.log" ]; then
+          cp "${{ runner.temp }}/scanner.log" "$GITHUB_WORKSPACE/scanner.log"
         fi
 
     - name: Fail Job if Detections
       shell: bash
       if: ${{ inputs.fail_on_detection == 'true' }}
       run: |
-        detections=$(jq '.detection_count' "$OUTPUT_FILE")
+        detections=$(jq '.detection_count // 0' "$OUTPUT_FILE")
         if [ "$detections" -gt 0 ]; then
           echo "Detections found: $detections. Failing job."
           exit 1
